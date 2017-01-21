@@ -202,6 +202,9 @@ pub trait Handler {
     /// Restore cursor position
     fn restore_cursor_position(&mut self) {}
 
+    /// Set cursor style
+    fn set_cursor_style(&mut self, _style: Option<CursorStyle>) {}
+
     /// Clear current line
     fn clear_line(&mut self, _mode: LineClearMode) {}
 
@@ -250,6 +253,33 @@ pub trait Handler {
     /// 'Designate' a graphic character set as one of G0 to G3, so that it can
     /// later be 'invoked' by `set_active_charset`
     fn configure_charset(&mut self, CharsetIndex, StandardCharset) {}
+}
+/// Cursor styles
+#[derive(Debug, Eq, PartialEq)]
+pub enum CursorStyle {
+    BlinkingBlock,
+    SteadyBlock,
+    BlinkingUnderline,
+    SteadyUnderline,
+    BlinkingBar,
+    SteadyBar,
+}
+
+impl CursorStyle {
+    /// Create cursor style from a primitive
+    ///
+    pub fn from_primitive(num: i64) -> Option<CursorStyle> {
+        match num {
+            0 => Some(CursorStyle::BlinkingBlock),
+            1 => Some(CursorStyle::BlinkingBlock),
+            2 => Some(CursorStyle::SteadyBlock),
+            3 => Some(CursorStyle::BlinkingUnderline),
+            4 => Some(CursorStyle::SteadyUnderline),
+            5 => Some(CursorStyle::BlinkingBar),
+            6 => Some(CursorStyle::SteadyBar),
+            _ => None,
+        }
+    }
 }
 
 /// Terminal modes
@@ -756,6 +786,15 @@ impl<'a, H, W> vte::Perform for Performer<'a, H, W>
                     handler.terminal_attribute(attr);
 
                     i += 1; // C-for expr
+                }
+            }
+            'q' => {
+                let is_cursor_style = intermediates.get(0).map(|b| *b == b' ').unwrap_or(false);
+                if is_cursor_style {
+                    let style = CursorStyle::from_primitive(arg_or_default!(idx: 0, default: 1));
+                    handler.set_cursor_style(style);
+                } else {
+                    unhandled!();
                 }
             }
             // TODO this should be a device status report

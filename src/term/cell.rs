@@ -96,6 +96,15 @@ impl Cell {
         // memcpy template to self
         *self = *template;
     }
+
+    #[inline]
+    pub fn set_underline(&mut self, b: bool) {
+        if b {
+            self.flags.insert(UNDERLINE);
+        } else {
+            self.flags.remove(UNDERLINE);
+        }
+    }
 }
 
 #[cfg(test)]

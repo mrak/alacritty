@@ -220,6 +220,10 @@ pub struct Config {
     #[serde(default)]
     font: Font,
 
+    /// Cursor style
+    #[serde(default)]
+    cursor: CursorOptions,
+
     /// Should show render timer
     #[serde(default)]
     render_timer: bool,
@@ -275,6 +279,7 @@ impl Default for Config {
             draw_bold_text_with_bright_colors: true,
             dpi: Default::default(),
             font: Default::default(),
+            cursor: Default::default(),
             render_timer: Default::default(),
             custom_cursor_colors: false,
             colors: Default::default(),
@@ -974,6 +979,12 @@ impl Config {
         &self.dpi
     }
 
+    /// Get cursor config
+    #[inline]
+    pub fn cursor(&self) -> &CursorOptions {
+        &self.cursor
+    }
+
     /// Should show render timer
     #[inline]
     pub fn render_timer(&self) -> bool {
@@ -1016,6 +1027,77 @@ impl Config {
         f.read_to_string(&mut contents)?;
 
         Ok(contents)
+    }
+}
+
+fn cursor_shape_from_string<D>(deserializer: D) -> ::std::result::Result<CursorShape, D::Error>
+    where D: de::Deserializer
+{
+    struct CursorShapeVisitor;
+
+    impl ::serde::de::Visitor for CursorShapeVisitor {
+        type Value = CursorShape;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("Bar, Underline, or Block")
+        }
+
+        fn visit_str<E>(self, value: &str) -> ::std::result::Result<CursorShape, E>
+            where E: ::serde::de::Error
+        {
+            match value.to_lowercase().as_ref() {
+                "bar" => Ok(CursorShape::Bar),
+                "underline" => Ok(CursorShape::Underline),
+                "block" => Ok(CursorShape::Block),
+                _ => Err(E::invalid_value(Unexpected::Str(value), &self))
+            }
+        }
+    }
+
+    deserializer.deserialize_str(CursorShapeVisitor)
+}
+
+
+/// Cursor shape
+#[derive(Debug, Deserialize)]
+pub enum CursorShape {
+    Block,
+    Bar,
+    Underline
+}
+
+/// Cursor options
+#[derive(Debug, Deserialize)]
+pub struct CursorOptions {
+    #[serde(deserialize_with = "cursor_shape_from_string")]
+    shape: CursorShape,
+    blink: bool
+}
+
+impl Default for CursorOptions {
+    fn default() -> CursorOptions {
+        CursorOptions {
+            shape: CursorShape::Block,
+            blink: false,
+        }
+    }
+}
+
+impl CursorOptions {
+    pub fn style(&self) -> ansi::CursorStyle {
+        if self.blink {
+            match self.shape {
+                CursorShape::Block => ansi::CursorStyle::BlinkingBlock,
+                CursorShape::Bar => ansi::CursorStyle::BlinkingBar,
+                CursorShape::Underline => ansi::CursorStyle::BlinkingUnderline,
+            }
+        } else {
+            match self.shape {
+                CursorShape::Block => ansi::CursorStyle::SteadyBlock,
+                CursorShape::Bar => ansi::CursorStyle::SteadyBar,
+                CursorShape::Underline => ansi::CursorStyle::SteadyUnderline,
+            }
+        }
     }
 }
 

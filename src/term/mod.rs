@@ -19,7 +19,7 @@ use std::ptr;
 use std::cmp::min;
 use std::io;
 
-use ansi::{self, Color, NamedColor, Attr, Handler, CharsetIndex, StandardCharset};
+use ansi::{self, Color, NamedColor, Attr, Handler, CursorStyle, CharsetIndex, StandardCharset};
 use grid::{Grid, ClearRegion, ToRange};
 use index::{self, Point, Column, Line, Linear, IndexRange, Contains, RangeInclusive};
 use selection::{Span, Selection};
@@ -40,6 +40,7 @@ use self::cell::LineLength;
 pub struct RenderableCellsIter<'a> {
     grid: &'a mut Grid<Cell>,
     cursor: &'a Point,
+    cursor_style: &'a CursorStyle,
     mode: TermMode,
     line: Line,
     column: Column,
@@ -58,6 +59,7 @@ impl<'a> RenderableCellsIter<'a> {
         mode: TermMode,
         selection: &Selection,
         custom_cursor_colors: bool,
+        cursor_style: &'b CursorStyle,
     ) -> RenderableCellsIter<'b> {
         let selection = selection.span()
             .map(|span| span.to_range(grid.num_cols()));
@@ -70,6 +72,7 @@ impl<'a> RenderableCellsIter<'a> {
             column: Column(0),
             selection: selection,
             cursor_original: None,
+            cursor_style: cursor_style,
         }.initialize(custom_cursor_colors)
     }
 
@@ -80,14 +83,18 @@ impl<'a> RenderableCellsIter<'a> {
                 column: self.cursor.col,
                 inner:  self.grid[self.cursor]
             });
-            if custom_cursor_colors {
-                let cell = &mut self.grid[self.cursor];
-                cell.fg = Color::Named(NamedColor::CursorForeground);
-                cell.bg = Color::Named(NamedColor::CursorBackground);
-
-            } else {
-                let cell = &mut self.grid[self.cursor];
-                mem::swap(&mut cell.fg, &mut cell.bg);
+            match *self.cursor_style {
+                CursorStyle::SteadyUnderline => self.grid[self.cursor].set_underline(true),
+                _ => {
+                    if custom_cursor_colors {
+                        let cell = &mut self.grid[self.cursor];
+                        cell.fg = Color::Named(NamedColor::CursorForeground);
+                        cell.bg = Color::Named(NamedColor::CursorBackground);
+                    } else {
+                        let cell = &mut self.grid[self.cursor];
+                        mem::swap(&mut cell.fg, &mut cell.bg);
+                    }
+                },
             }
         }
         self
@@ -152,7 +159,7 @@ impl<'a> Iterator for RenderableCellsIter<'a> {
                     .unwrap_or(false);
 
                 // Skip empty cells
-                if cell.is_empty() && !selected {
+                if cell.is_empty() && !selected && self.grid[self.cursor] != *cell {
                     continue;
                 }
 
@@ -328,6 +335,9 @@ pub struct Term {
     /// being mapped to
     active_charset: CharsetIndex,
 
+    /// Cursor style
+    cursor_style: CursorStyle,
+
     /// Tabstops
     tabs: Vec<bool>,
 
@@ -402,6 +412,11 @@ impl Term {
         self.next_title.take()
     }
 
+    pub fn update_config(&mut self, config: &Config) {
+        self.cursor_style = config.cursor().style();
+        self.custom_cursor_colors = config.custom_cursor_colors()
+    }
+
     pub fn new(config : &Config, size: SizeInfo) -> Term {
         let template = Cell::default();
 
@@ -430,6 +445,7 @@ impl Term {
             cursor: Default::default(),
             cursor_save: Default::default(),
             cursor_save_alt: Default::default(),
+            cursor_style: config.cursor().style(),
             tabs: tabs,
             mode: Default::default(),
             scroll_region: scroll_region,
@@ -437,10 +453,6 @@ impl Term {
             empty_cell: template,
             custom_cursor_colors: config.custom_cursor_colors(),
         }
-    }
-
-    pub fn update_config(&mut self, config: &Config) {
-        self.custom_cursor_colors = config.custom_cursor_colors()
     }
 
     #[inline]
@@ -598,7 +610,8 @@ impl Term {
             &self.cursor.point,
             self.mode,
             selection,
-            self.custom_cursor_colors
+            self.custom_cursor_colors,
+            &self.cursor_style
         )
     }
 
@@ -1089,6 +1102,14 @@ impl ansi::Handler for Term {
     }
 
     #[inline]
+    fn set_cursor_style(&mut self, style: Option<CursorStyle>) {
+        match style {
+            Some(s) => self.cursor_style = s,
+            None    => return,
+        }
+    }
+
+    #[inline]
     fn clear_line(&mut self, mode: ansi::LineClearMode) {
         trace!("clear_line: {:?}", mode);
         let template = self.empty_cell;
@@ -1325,6 +1346,7 @@ mod benches {
 
     use grid::Grid;
     use selection::Selection;
+    use config::Config;
 
     use super::{SizeInfo, Term};
     use super::cell::Cell;
@@ -1360,6 +1382,7 @@ mod benches {
 
         let mut grid: Grid<Cell> = json::from_str(&serialized_grid).unwrap();
         let size: SizeInfo = json::from_str(&serialized_size).unwrap();
+        let config: Config = Default::default();
 
         let mut terminal = Term::new(&Default::default(), size);
         mem::swap(&mut terminal.grid, &mut grid);
